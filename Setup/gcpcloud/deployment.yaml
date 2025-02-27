@@ -1,0 +1,298 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: psql-deployment
+spec:
+  selector:
+    matchLabels:
+      app: psql
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: psql
+    spec:
+      containers:
+      - name: psql
+        image: postgres:17.0
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_PASSWORD
+          value: postgres
+        - name: POSTGRES_USER
+          value: postgres
+        volumeMounts:
+        - name: init-script-volume
+          mountPath: /docker-entrypoint-initdb.d
+      volumes:
+      - name: init-script-volume
+        configMap:
+          name: postgres-init-scripts
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init-scripts
+data:
+  init.sql: |
+    DO $$
+    BEGIN
+    CREATE USER caseirinhareal with SUPERUSER LOGIN password 'caseirinhareal';
+    EXCEPTION WHEN duplicate_object THEN RAISE NOTICE '%, skipping', SQLERRM USING ERRCODE = SQLSTATE;
+    END
+    $$;
+    DROP DATABASE IF EXISTS orders;
+    DROP DATABASE IF EXISTS products;
+    DROP DATABASE IF EXISTS users;
+    CREATE DATABASE orders;
+    CREATE DATABASE products;
+    CREATE DATABASE users;
+---
+# Database Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: psql-service
+spec:
+  selector:
+    app: psql
+  ports:
+    - protocol: TCP
+      port: 5432
+      targetPort: 5432
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: users-deployment
+spec:
+  selector:
+    matchLabels:
+      app: users-backend
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: users-backend
+    spec:
+      containers:
+      - name: users
+        image: bernardosousa03/users:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: DATABASE_USERNAME
+          value: caseirinhareal
+        - name: DATABASE_PASSWORD
+          value: caseirinhareal
+        - name: DATABASE_URL
+          value: jdbc:postgresql://psql-service:5432/users
+        - name: USER_ALLOWED_ORIGINS
+          value: EXTERNAL_IP_HERE:PORT_NUMBER
+---
+# Backend Services
+apiVersion: v1
+kind: Service
+metadata:
+  name: users-service
+spec:
+  selector:
+    app: users-backend
+  ports:
+  - protocol: TCP
+    port: 8080
+    targetPort: 8080
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: products-deployment
+spec:
+  selector:
+    matchLabels:
+      app: products-backend
+  replicas: 3
+  template:
+    metadata:
+      labels:
+        app: products-backend
+    spec:
+      containers:
+      - name: products
+        image: bernardosousa03/products:latest
+        ports:
+        - containerPort: 8082
+        env:
+        - name: DATABASE_USERNAME
+          value: caseirinhareal
+        - name: DATABASE_PASSWORD
+          value: caseirinhareal
+        - name: DATABASE_URL
+          value: jdbc:postgresql://psql-service:5432/products
+        - name: USERS_URL
+          value: http://users-service:8080/auth/confirm
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders-deployment
+spec:
+  selector:
+    matchLabels:
+      app: orders-backend
+  replicas: 3
+  template:
+    metadata:
+      labels:
+        app: orders-backend
+    spec:
+      containers:
+      - name: orders
+        image: bernardosousa03/orders:latest
+        ports:
+        - containerPort: 8081
+        env:
+        - name: DATABASE_USERNAME
+          value: caseirinhareal
+        - name: DATABASE_PASSWORD
+          value: caseirinhareal
+        - name: DATABASE_URL
+          value: jdbc:postgresql://psql-service:5432/orders
+        - name: USERS_URL
+          value: http://users-service:8080/auth/confirm
+
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend-deployment
+spec:
+  selector:
+    matchLabels:
+      app: frontend
+  replicas: 3
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+      - name: frontend
+        image: bernardosousa03/frontend:latest
+        ports:
+        - containerPort: 3000
+        env:
+          - name: REACT_APP_BACKEND_PRODUCTS_BASE_URL
+            value: EXTERNAL_IP_HERE:PORT_NUMBER
+          - name: REACT_APP_BACKEND_SHOPPING_CART_BASE_URL
+            value: EXTERNAL_IP_HERE:PORT_NUMBER
+          - name: REACT_APP_BACKEND_USERS_BASE_URL
+            value: EXTERNAL_IP_HERE:PORT_NUMBER
+---
+# Frontend Service
+apiVersion: v1
+kind: Service
+metadata: 
+  name: frontend-service
+spec:
+  selector:
+    app: frontend
+  ports:
+  - protocol: TCP
+    port: 3000
+    targetPort: 3000
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: products-service
+spec:
+  selector:
+    app: products-backend
+  ports:
+  - protocol: TCP
+    port: 8082
+    targetPort: 8082
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orders-service
+spec:
+  selector:
+    app: orders-backend
+  ports:
+  - protocol: TCP
+    port: 8081
+    targetPort: 8081
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: frontend-ingress
+  namespace: default
+  annotations:
+    nginx.ingress.kubernetes.io/whitelist-source-range: "0.0.0.0/0"  # Allow all IPs, for testing purposes
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "EXTERNAL_IP_HERE,EXTERNAL_IP_HERE/,EXTERNAL_IP_HERE/signup,EXTERNAL_IP_HERE/**,EXTERNAL_IP_HERE/auth/user"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS"
+    nginx.ingress.kubernetes.io/cors-allow-headers: "Content-Type, Authorization"
+    nginx.ingress.kubernetes.io/cors-allow-credentials: "true"
+  # annotations:
+  #   nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+  - http:
+      paths:
+      # Route / to frontend-service
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: frontend-service
+            port:
+              number: 3000
+            
+      # Route /products to user-service
+      - path: /products
+        pathType: Prefix
+        backend:
+          service:
+            name: products-service
+            port:
+              number: 8082
+
+      # Route /order to user-service
+      - path: /order
+        pathType: Prefix
+        backend:
+          service:
+            name: orders-service
+            port:
+              number: 8081
+
+      # Route /user to user-service
+      - path: /user
+        pathType: Prefix
+        backend:
+          service:
+            name: users-service
+            port:
+              number: 8080
+      
+      - path: /auth/user
+        pathType: Prefix
+        backend:
+          service:
+            name: users-service
+            port:
+              number: 8080

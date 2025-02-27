@@ -1,0 +1,12 @@
+---
+- hosts: master
+  become: yes
+  become_user: root
+  become_method: sudo
+  tasks:
+
+    - name: install nginx ingress controler
+      shell: sudo kubectl delete -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.8.0/deploy/static/provider/cloud/deploy.yaml
+
+    - name: Delete deployment
+      shell: sudo kubectl delete -f /home/ubuntu/deployment.yaml
