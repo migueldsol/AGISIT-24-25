@@ -18,7 +18,10 @@ This repository contains the **Caseirinha Real** web application—a cake store 
 ## Project Setup Guide
 
 For detailed instructions on how to deploy and run the application, please visit:  
+
 [**Caseirinha Real - Deployment Instructions**](Setup.md)
+
+[**Video Explaining Setup**](https://www.youtube.com/watch?v=igI56kZPcIg)
 
 
 ## Acknowledgments
